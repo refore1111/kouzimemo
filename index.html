@@ -126,6 +126,26 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
 .calc-actions button{flex:1;border:none;border-radius:6px;padding:10px;font-weight:700;cursor:pointer;}
 #calcCancel{background:var(--paper-2);color:var(--panel);}
 #calcOk{background:var(--amber);color:var(--ink);}
+
+/* voice input */
+.voice-overlay{display:none;position:fixed;inset:0;background:rgba(27,36,48,.65);z-index:70;align-items:center;justify-content:center;padding:16px;}
+.voice-overlay.show{display:flex;}
+.voice-box{background:#fff;border-radius:10px;padding:18px;width:100%;max-width:420px;max-height:88vh;overflow-y:auto;}
+.voice-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;}
+.voice-header span{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:800;color:var(--panel);}
+.voice-close{background:none;border:none;font-size:18px;color:var(--text-soft);cursor:pointer;}
+.voice-status{font-size:12.5px;color:var(--text-soft);margin-bottom:12px;line-height:1.5;}
+.voice-controls{display:flex;align-items:center;gap:12px;margin-bottom:12px;}
+.voice-record-btn{flex:1;background:var(--red);color:#fff;border:none;border-radius:8px;padding:12px;font-family:'Barlow Condensed',sans-serif;font-size:16px;font-weight:800;cursor:pointer;}
+.voice-record-btn.recording{background:#8f2e1c;animation:voicepulse 1.2s infinite;}
+@keyframes voicepulse{0%{opacity:1;}50%{opacity:.6;}100%{opacity:1;}}
+.voice-timer{font-family:'Barlow Condensed',sans-serif;font-size:18px;color:var(--panel);min-width:52px;text-align:right;}
+#voiceTranscript{min-height:120px;}
+.voice-actions{display:flex;gap:8px;margin-top:10px;}
+.voice-actions button{flex:1;border:none;border-radius:8px;padding:11px;font-family:'Barlow Condensed',sans-serif;font-size:14.5px;font-weight:700;cursor:pointer;}
+#voiceHeuristicBtn{background:var(--paper-2);color:var(--panel);}
+#voiceAiBtn{background:var(--amber);color:var(--ink);}
+.voice-line{margin-top:8px;}
 .no-print{}
 </style>
 </head>
@@ -188,6 +208,30 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
       <button type="button" id="calcCancel">キャンセル</button>
       <button type="button" id="calcOk">この値を入力</button>
     </div>
+  </div>
+</div>
+
+<div class="voice-overlay" id="voiceOverlay">
+  <div class="voice-box">
+    <div class="voice-header">
+      <span>🎤 音声入力</span>
+      <button type="button" class="voice-close" id="voiceCloseBtn">✕</button>
+    </div>
+    <div class="voice-status" id="voiceStatus">マイクの使用を許可してから「録音開始」を押してください。</div>
+    <div class="voice-controls">
+      <button type="button" class="voice-record-btn" id="voiceRecordBtn">🎤 録音開始</button>
+      <span class="voice-timer" id="voiceTimer">00:00</span>
+    </div>
+    <div class="field">
+      <span class="field-label">文字起こし（自動・編集可）</span>
+      <textarea id="voiceTranscript" placeholder="対応ブラウザ（主にChrome）では録音中に自動で文字起こしされます。手動で入力・修正することもできます。"></textarea>
+    </div>
+    <audio id="voicePlayback" controls style="width:100%;display:none;margin-top:8px;"></audio>
+    <div class="voice-actions">
+      <button type="button" id="voiceHeuristicBtn">キーワードで自動入力</button>
+      <button type="button" id="voiceAiBtn">AIで自動入力</button>
+    </div>
+    <div class="small-note" id="voiceAiNote" style="margin-top:8px;color:var(--text-soft);font-size:12.5px;"></div>
   </div>
 </div>
 
@@ -876,7 +920,8 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     let html=renderCard(cleaningCard,'cleaning');
     html+=`<div class="card"><h3>工事内容</h3><div id="workRows">`+
       record.workItems.map((r,i)=>renderWorkRow(r,i)).join('')+
-      `</div><button type="button" class="add-line" id="addWorkRow">＋ 工事項目を追加</button></div>`;
+      `</div><button type="button" class="add-line" id="addWorkRow">＋ 工事項目を追加</button>`+
+      `<button type="button" class="add-line voice-line" id="openVoiceBtn">🎤 音声で入力</button></div>`;
     el.innerHTML=html;
     bindFieldEvents(el);
     bindWorkEvents(el);
@@ -912,6 +957,8 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
 
   function bindWorkEvents(el){
     $('addWorkRow').addEventListener('click',()=>{ record.workItems.push({}); renderWork(); });
+    const voiceBtn=$('openVoiceBtn');
+    if(voiceBtn) voiceBtn.addEventListener('click', openVoicePanel);
 
     el.querySelectorAll('[data-wpath]').forEach(node=>{
       const [idxStr,key]=node.dataset.wpath.split('.');
@@ -1014,6 +1061,198 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     $('calcOverlay').classList.remove('show');
   });
 
+  /* ---------------- VOICE INPUT ---------------- */
+  const STORE_AI_KEY='ai-api-key';
+  let aiApiKey='';
+  async function loadAiKey(){
+    try{ const res=await window.storage.get(STORE_AI_KEY,false); if(res&&res.value) return res.value; }catch(e){}
+    return '';
+  }
+  async function saveAiKey(){
+    try{ await window.storage.set(STORE_AI_KEY, aiApiKey, false); }catch(e){ console.error(e); }
+  }
+
+  let voiceMediaRecorder=null, voiceAudioChunks=[], voiceRecognizer=null, voiceRecordStart=null, voiceTimerInterval=null;
+  const voiceRecognitionSupported = !!(window.SpeechRecognition||window.webkitSpeechRecognition);
+
+  function openVoicePanel(){
+    $('voiceTranscript').value='';
+    $('voicePlayback').style.display='none';
+    $('voicePlayback').src='';
+    $('voiceTimer').textContent='00:00';
+    $('voiceRecordBtn').textContent='🎤 録音開始';
+    $('voiceRecordBtn').classList.remove('recording');
+    $('voiceAiNote').textContent='';
+    $('voiceStatus').textContent = voiceRecognitionSupported
+      ? 'マイクの使用を許可してから「録音開始」を押してください（文字起こしは主にChromeで動作します）。'
+      : 'このブラウザは自動の文字起こしに対応していません。録音はできますが、内容は手動で入力してください。';
+    $('voiceOverlay').classList.add('show');
+  }
+  function closeVoicePanel(){
+    if(voiceMediaRecorder && voiceMediaRecorder.state==='recording') voiceMediaRecorder.stop();
+    if(voiceTimerInterval) clearInterval(voiceTimerInterval);
+    if(voiceRecognizer) try{ voiceRecognizer.stop(); }catch(e){}
+    $('voiceOverlay').classList.remove('show');
+  }
+  function updateVoiceTimer(){
+    const sec=Math.floor((Date.now()-voiceRecordStart)/1000);
+    const m=String(Math.floor(sec/60)).padStart(2,'0');
+    const s=String(sec%60).padStart(2,'0');
+    $('voiceTimer').textContent=m+':'+s;
+  }
+  function startVoiceRecognition(){
+    const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+    voiceRecognizer=new SR();
+    voiceRecognizer.lang='ja-JP';
+    voiceRecognizer.continuous=true;
+    voiceRecognizer.interimResults=true;
+    let finalText=$('voiceTranscript').value;
+    voiceRecognizer.onresult=(e)=>{
+      let interim='';
+      for(let i=e.resultIndex;i<e.results.length;i++){
+        const t=e.results[i][0].transcript;
+        if(e.results[i].isFinal) finalText+=t; else interim+=t;
+      }
+      $('voiceTranscript').value=finalText+interim;
+    };
+    voiceRecognizer.onerror=()=>{};
+    voiceRecognizer.onend=()=>{
+      if(voiceMediaRecorder && voiceMediaRecorder.state==='recording'){ try{ voiceRecognizer.start(); }catch(e){} }
+    };
+    try{ voiceRecognizer.start(); }catch(e){}
+  }
+  async function startVoiceRecording(){
+    try{
+      const stream=await navigator.mediaDevices.getUserMedia({audio:true});
+      voiceAudioChunks=[];
+      voiceMediaRecorder=new MediaRecorder(stream);
+      voiceMediaRecorder.ondataavailable=(e)=>{ if(e.data.size>0) voiceAudioChunks.push(e.data); };
+      voiceMediaRecorder.onstop=()=>{
+        const blob=new Blob(voiceAudioChunks,{type:'audio/webm'});
+        const url=URL.createObjectURL(blob);
+        $('voicePlayback').src=url;
+        $('voicePlayback').style.display='block';
+        stream.getTracks().forEach(t=>t.stop());
+      };
+      voiceMediaRecorder.start();
+      voiceRecordStart=Date.now();
+      voiceTimerInterval=setInterval(updateVoiceTimer,500);
+      $('voiceRecordBtn').textContent='■ 録音停止';
+      $('voiceRecordBtn').classList.add('recording');
+      $('voiceStatus').textContent='録音中...';
+      if(voiceRecognitionSupported) startVoiceRecognition();
+    }catch(e){
+      $('voiceStatus').textContent='マイクを使用できませんでした。ブラウザでマイクへのアクセスを許可しているかご確認ください。このファイルをブラウザで直接開いている場合（file://）は、マイクが使えないことがあります。';
+    }
+  }
+  function stopVoiceRecording(){
+    if(voiceMediaRecorder && voiceMediaRecorder.state==='recording') voiceMediaRecorder.stop();
+    if(voiceTimerInterval) clearInterval(voiceTimerInterval);
+    if(voiceRecognizer) try{ voiceRecognizer.stop(); }catch(e){}
+    $('voiceRecordBtn').textContent='🎤 録音開始';
+    $('voiceRecordBtn').classList.remove('recording');
+    $('voiceStatus').textContent='録音を停止しました。内容を確認・修正してから、下のボタンで工事項目に自動入力してください。';
+  }
+  $('voiceRecordBtn').addEventListener('click',()=>{
+    if(voiceMediaRecorder && voiceMediaRecorder.state==='recording') stopVoiceRecording();
+    else startVoiceRecording();
+  });
+  $('voiceCloseBtn').addEventListener('click', closeVoicePanel);
+
+  function parseTranscriptHeuristic(text){
+    const opts=allWorkContentOptions();
+    const locs=masterOptions('work_location');
+    let matchedContent=null, matchedUnit='';
+    for(const o of opts){ if(text.includes(o.name)){ matchedContent=o.name; matchedUnit=o.unit; break; } }
+    let matchedLoc=null;
+    for(const l of locs){ if(text.includes(l)){ matchedLoc=l; break; } }
+    const qtyMatch=text.match(/([0-9]+(?:\.[0-9]+)?)\s*(㎡|平米|平方メートル|メートル|m|枚|個|式|箇所|本|台)/);
+    let qty='', unit=matchedUnit;
+    if(qtyMatch){
+      qty=qtyMatch[1];
+      const u=qtyMatch[2];
+      if(u==='平米'||u==='平方メートル') unit='㎡';
+      else if(u==='メートル') unit='m';
+      else if(!matchedUnit) unit=u;
+    }
+    return [{ location:matchedLoc||'', content:matchedContent||'', qty, unit, note:text }];
+  }
+
+  async function parseTranscriptAI(text){
+    if(!aiApiKey) throw new Error('NO_KEY');
+    const opts=allWorkContentOptions().map(o=>o.name);
+    const sys=`あなたは日本語の現場音声メモを解析するアシスタントです。渡されたテキストから工事項目を抽出し、次のJSON形式のみを出力してください（説明文やコードブロック記号は不要です）。\n{"items":[{"location":"箇所（例:洋室、キッチン、トイレ等。不明なら空文字）","content":"工事内容","qty":"数量（半角数字のみ。不明なら空文字）","unit":"単位（㎡,m,枚,個,式,箇所,本,台のいずれか。不明なら空文字）","note":"補足・状況など"}]}\n工事内容は、できるだけ次のリストの表記に合わせてください（近いものがあれば流用してください）: ${opts.slice(0,80).join('、')}\nリストに無い内容は、音声の趣旨から適切な短い名称を作成してください。複数の工事内容が話されていれば、itemsに複数個並べてください。`;
+    const res=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{
+        'content-type':'application/json',
+        'x-api-key':aiApiKey,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body:JSON.stringify({
+        model:'claude-sonnet-5',
+        max_tokens:1024,
+        system:sys,
+        messages:[{role:'user',content:text}]
+      })
+    });
+    if(!res.ok){
+      const errText=await res.text().catch(()=>'');
+      throw new Error('API_ERROR:'+res.status+':'+errText.slice(0,200));
+    }
+    const data=await res.json();
+    const textOut=(data.content||[]).map(b=>b.text||'').join('');
+    const cleaned=textOut.replace(/```json|```/g,'').trim();
+    const parsed=JSON.parse(cleaned);
+    return parsed.items||[];
+  }
+
+  function applyParsedVoiceItems(items){
+    if(!items || !items.length) return;
+    items.forEach(item=>{
+      const row={
+        location:item.location||'',
+        content:item.content||'',
+        qty:item.qty||'',
+        unit:item.unit||'',
+        reason:item.note||'',
+      };
+      if(row.content){
+        const price=lookupWorkPrice(row.content);
+        if(price) row.unitPrice=price;
+      }
+      record.workItems.push(row);
+    });
+    record.workItems.forEach((r,idx)=>recalcRowAmount(idx));
+    renderWork();
+  }
+
+  $('voiceHeuristicBtn').addEventListener('click',()=>{
+    const text=$('voiceTranscript').value.trim();
+    if(!text){ $('voiceAiNote').textContent='文字起こしが空です。録音するか、手動で入力してください。'; return; }
+    applyParsedVoiceItems(parseTranscriptHeuristic(text));
+    closeVoicePanel();
+    switchTab('work');
+  });
+  $('voiceAiBtn').addEventListener('click', async ()=>{
+    const text=$('voiceTranscript').value.trim();
+    if(!text){ $('voiceAiNote').textContent='文字起こしが空です。録音するか、手動で入力してください。'; return; }
+    $('voiceAiNote').textContent='AIで解析中...';
+    try{
+      const items=await parseTranscriptAI(text);
+      applyParsedVoiceItems(items);
+      closeVoicePanel();
+      switchTab('work');
+    }catch(e){
+      if(String(e.message).includes('NO_KEY')){
+        $('voiceAiNote').textContent='AnthropicのAPIキーが未設定です。設定タブ→工事・清掃の「AI音声入力 設定」で登録してください。キーが無くても「キーワードで自動入力」は使えます。';
+      } else {
+        $('voiceAiNote').textContent='AI解析でエラーが発生しました。キーワードでの自動入力もお試しください。('+e.message+')';
+      }
+    }
+  });
+
   /* ---------------- NOTES TAB ---------------- */
   const notesCard={title:'採寸・メモ／備考・連絡事項', fields:[
     {key:'measurements',label:'採寸・メモ',type:'textarea',placeholder:'寸法や現地で気づいたことを自由に記入'},
@@ -1069,6 +1308,20 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
       </div>
     </div>`;
   }
+  function renderAiSettingsCard(){
+    return `<div class="settings-group">
+      <div class="settings-group-title">AI音声入力 設定</div>
+      <div class="card">
+        <div class="small-note" style="margin-bottom:10px;color:var(--text-soft);font-size:12.5px;">
+          音声入力の「AIで自動入力」を使うには、ご自身のAnthropic APIキーが必要です。キーはこの端末にのみ保存され、他のサーバーには送信されません（入力内容はAnthropicのAPIへ直接送信されます）。お持ちでなくても「キーワードで自動入力」は利用できます。
+        </div>
+        <div class="field"><span class="field-label">Anthropic APIキー</span>
+          <input type="password" id="aiApiKeyInput" value="${esc(aiApiKey||'')}" placeholder="sk-ant-...">
+        </div>
+        <button type="button" class="add-line" id="aiApiKeySaveBtn">保存</button>
+      </div>
+    </div>`;
+  }
   function renderSettings(){
     const el=$('settingsBody');
     const nav=`<div class="settings-subnav">${SETTINGS_TAB_ORDER.map(k=>
@@ -1079,7 +1332,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
       const keys=Object.keys(MASTER_REGISTRY).filter(k=>MASTER_REGISTRY[k].group===group);
       return `<div class="settings-group"><div class="settings-group-title">${esc(group)}</div>${keys.map(renderMasterCard).join('')}</div>`;
     }).join('');
-    if(currentSettingsTab==='work') body += renderPriceMasterCard();
+    if(currentSettingsTab==='work') body += renderPriceMasterCard() + renderAiSettingsCard();
     el.innerHTML = nav + body;
     el.querySelectorAll('[data-stab]').forEach(btn=>{
       btn.addEventListener('click',()=>{ currentSettingsTab=btn.dataset.stab; renderSettings(); });
@@ -1090,6 +1343,15 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     const companySelect=el.querySelector('#priceCompanySelect');
     if(companySelect){
       companySelect.addEventListener('change',()=>{ currentPriceCompany=companySelect.value; renderSettings(); });
+    }
+    const aiSaveBtn=el.querySelector('#aiApiKeySaveBtn');
+    if(aiSaveBtn){
+      aiSaveBtn.addEventListener('click', async ()=>{
+        aiApiKey=$('aiApiKeyInput').value.trim();
+        await saveAiKey();
+        aiSaveBtn.textContent='保存しました ✓';
+        setTimeout(()=>{ aiSaveBtn.textContent='保存'; },1200);
+      });
     }
     el.querySelectorAll('[data-priceinput]').forEach(inp=>{
       inp.addEventListener('change', async ()=>{
@@ -1413,6 +1675,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     ensureMastersDefaults();
     customWorkContents = await loadCustomWorkContents();
     workPriceMaster = await loadWorkPriceMaster();
+    aiApiKey = await loadAiKey();
     const commonSeeded = seedCommonPriceDefaults();
     const companySeeded = seedCompanyPriceDefaults();
     if(commonSeeded || companySeeded) await saveWorkPriceMaster();
