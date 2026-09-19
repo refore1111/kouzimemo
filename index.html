@@ -81,6 +81,17 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
 .amount-label{font-size:12.5px;color:var(--text-soft);font-weight:700;}
 .amount-value{font-family:'Barlow Condensed',sans-serif;font-size:20px;font-weight:800;color:var(--panel);}
 
+/* document creation tab */
+.doc-item-row{display:flex;align-items:flex-start;gap:10px;padding:9px 0;border-bottom:1px solid var(--paper-2);font-size:13.5px;}
+.doc-item-row:last-child{border-bottom:none;}
+.doc-item-row input[type=checkbox]{margin-top:3px;width:18px;height:18px;flex:0 0 auto;}
+.doc-item-row .doc-item-text{flex:1;line-height:1.5;}
+.doc-item-row .doc-item-text b{color:var(--panel);}
+.doc-totals{background:var(--paper);border:1px solid var(--paper-2);border-radius:6px;padding:10px 14px;margin-top:4px;}
+.doc-totals div{display:flex;justify-content:space-between;font-size:13.5px;padding:3px 0;}
+.doc-totals div.grand{border-top:1px solid var(--paper-2);margin-top:4px;padding-top:8px;font-family:'Barlow Condensed',sans-serif;font-size:18px;font-weight:800;color:var(--panel);}
+.doc-empty-note{font-size:12.5px;color:var(--text-soft);padding:10px 0;}
+
 .save-bar{position:sticky;bottom:0;padding:10px 16px calc(10px + env(safe-area-inset-bottom));background:linear-gradient(0deg, var(--paper) 70%, rgba(238,240,234,0));display:flex;flex-direction:column;gap:8px;}
 .save-bar-row{display:flex;gap:8px;}
 .save-bar-row button{flex:1;background:var(--paper-2);color:var(--panel);border:none;border-radius:8px;padding:11px;font-family:'Barlow Condensed',sans-serif;font-size:15px;font-weight:700;letter-spacing:1px;cursor:pointer;}
@@ -166,6 +177,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     <button data-tab="equip">設備チェック</button>
     <button data-tab="work">工事・清掃</button>
     <button data-tab="notes">採寸・備考</button>
+    <button data-tab="docs">書類作成</button>
     <button data-tab="log">記録一覧</button>
     <button data-tab="settings">設定</button>
   </nav>
@@ -175,6 +187,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     <div class="tabpanel" id="tab-equip"></div>
     <div class="tabpanel" id="tab-work"></div>
     <div class="tabpanel" id="tab-notes"></div>
+    <div class="tabpanel" id="tab-docs"></div>
     <div class="tabpanel" id="tab-log">
       <div class="log-title">記録一覧 <span id="logCount"></span></div>
       <div id="logList"></div>
@@ -270,9 +283,11 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
   function esc(s){return String(s==null?'':s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
 
   function blankRecord(){
-    return { meta:{id:null, createdAt:null}, basic:{}, equipment:{ aircon:[{}] }, cleaning:{}, workItems:[], notes:{} };
+    return { meta:{id:null, createdAt:null}, basic:{}, equipment:{ aircon:[{}] }, cleaning:{}, workItems:[], notes:{}, documents:{} };
   }
   let record = blankRecord();
+  let currentDocType = 'estimate';
+  let companyInfo = {};
   let customWorkContents = []; // [{name,unit}]
   let workPriceMaster = {}; // { companyKey: { contentName: price } }, companyKey '__common__' = fallback
   let currentPriceCompany = '__common__';
@@ -1279,6 +1294,198 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     bindFieldEvents(el);
   }
 
+  /* ---------------- DOCUMENT CREATION TAB (書類作成) ---------------- */
+  const STORE_COMPANY_INFO='own-company-info';
+  const DEFAULT_COMPANY_INFO={
+    name:'株式会社Refore',
+    address:'東京都千代田区九段南一丁目5番6号\nりそな九段ビル5階KSフロア',
+    tel:'03-6824-7182',
+    contact:'金子（090-4422-7404）',
+    subPaymentTerms:'工事完了月末締め、翌々月10日支払い',
+  };
+  async function loadCompanyInfo(){
+    try{ const res=await storageAPI.get(STORE_COMPANY_INFO); if(res&&res.value) return JSON.parse(res.value); }catch(e){}
+    return {};
+  }
+  async function saveCompanyInfo(){
+    try{ await storageAPI.set(STORE_COMPANY_INFO, JSON.stringify(companyInfo)); }catch(e){ console.error(e); }
+  }
+
+  const DOC_TYPES=[
+    {key:'estimate', label:'見積書'},
+    {key:'uketsuke', label:'請書'},
+    {key:'invoice', label:'請求書'},
+    {key:'order', label:'発注書'},
+  ];
+  const DOC_TYPE_TITLES={estimate:'御見積書', uketsuke:'工事請書', invoice:'御請求書', order:'発注書'};
+  const documentsFieldsByType={
+    estimate:[
+      {key:'no',label:'見積No.',type:'text'},
+      {key:'clientContact',label:'先方担当者名（様）',type:'text'},
+      {key:'validity',label:'有効期限',type:'text'},
+      {key:'clientPaymentTerms',label:'支払条件（先方→当社）',type:'text'},
+    ],
+    uketsuke:[
+      {key:'no',label:'請書No.',type:'text'},
+      {key:'clientContact',label:'先方担当者名（様）',type:'text'},
+      {key:'constructionPeriod',label:'工期',type:'text'},
+    ],
+    invoice:[
+      {key:'no',label:'請求No.',type:'text'},
+      {key:'clientContact',label:'先方担当者名（様）',type:'text'},
+    ],
+    order:[
+      {key:'orderTo',label:'発注先（業者名）',type:'text'},
+      {key:'workDate',label:'作業予定日',type:'date'},
+    ],
+  };
+
+  function docFieldHtml(f){
+    const path='documents.'+currentDocType+'.'+f.key;
+    const val=getVal(record,path);
+    let inner;
+    if(f.type==='date') inner=`<input type="date" data-docpath="${path}" value="${esc(val||'')}">`;
+    else inner=`<input type="text" data-docpath="${path}" value="${esc(val||'')}" placeholder="${esc(f.placeholder||'')}">`;
+    return `<div class="field"><span class="field-label">${esc(f.label)}</span>${inner}</div>`;
+  }
+
+  function computeDocTotals(items){
+    const sub = items.reduce((s,w)=> s + (parseFloat(w.amount)||0), 0);
+    const tax = Math.round(sub*0.1);
+    return { sub, tax, total: sub+tax };
+  }
+
+  function renderDocs(){
+    const el=$('tab-docs');
+    if(!record.documents) record.documents={};
+    if(!record.documents[currentDocType]) record.documents[currentDocType]={};
+    const b=record.basic||{};
+    const nav=`<div class="settings-subnav">${DOC_TYPES.map(t=>
+      `<button type="button" class="settings-tab-btn${t.key===currentDocType?' active':''}" data-doctype="${t.key}">${esc(t.label)}</button>`
+    ).join('')}</div>`;
+
+    const headerCard=`<div class="card">
+      <h3>物件情報（基本情報タブと共通）</h3>
+      <div class="small-note" style="color:var(--text-soft);font-size:12.5px;">${esc(b.propertyName||'（物件名未設定）')} ${esc(b.room||'')}　${esc(b.address||'')}</div>
+    </div>`;
+
+    const fieldsCard=`<div class="card"><h3>${esc(DOC_TYPE_TITLES[currentDocType])}の項目</h3>${documentsFieldsByType[currentDocType].map(docFieldHtml).join('')}</div>`;
+
+    const isOrder = currentDocType==='order';
+    if(isOrder && !Array.isArray(record.documents.order.selected)) record.documents.order.selected=[];
+    const items=record.workItems||[];
+    let itemsCard;
+    if(!items.length){
+      itemsCard=`<div class="card"><h3>工事内容</h3><div class="doc-empty-note">「工事・清掃」タブに工事項目を追加すると、ここに表示されます。</div></div>`;
+    } else {
+      itemsCard=`<div class="card"><h3>工事内容${isOrder?'（発注書に含める項目を選択）':''}</h3>`+
+        items.map((w,i)=>{
+          const checked = isOrder ? record.documents.order.selected.includes(i) : true;
+          return `<div class="doc-item-row">
+            ${isOrder?`<input type="checkbox" data-docitem="${i}" ${checked?'checked':''}>`:''}
+            <div class="doc-item-text"><b>${esc(w.location||'-')}／${esc(w.content||'(未設定)')}</b><br>
+              数量:${esc(w.qty||'-')}${esc(w.unit||'')}　単価:${esc(w.unitPrice||'-')}　金額:${esc(w.amount||'-')}円${w.model?`　仕様:${esc(w.model)}`:''}
+            </div>
+          </div>`;
+        }).join('') + `</div>`;
+    }
+
+    const totalsItems = isOrder ? items.filter((w,i)=>record.documents.order.selected.includes(i)) : items;
+    const totals=computeDocTotals(totalsItems);
+    const totalsCard = currentDocType==='order' ? '' : `<div class="card"><h3>金額</h3>
+      <div class="doc-totals">
+        <div><span>小計</span><span>${totals.sub.toLocaleString()}円</span></div>
+        <div><span>消費税（10%）</span><span>${totals.tax.toLocaleString()}円</span></div>
+        <div class="grand"><span>${currentDocType==='invoice'?'ご請求金額':'税込合計金額'}</span><span>${totals.total.toLocaleString()}円</span></div>
+      </div>
+    </div>`;
+
+    const companyCard=`<div class="card"><h3>発行元情報（設定タブ→基本情報で編集）</h3>
+      <div class="small-note" style="color:var(--text-soft);font-size:12.5px;white-space:pre-wrap;">${esc(companyInfo.name||'')}\n${esc(companyInfo.address||'')}\nTEL：${esc(companyInfo.tel||'')}\n担当：${esc(companyInfo.contact||'')}</div>
+    </div>`;
+
+    el.innerHTML = nav + headerCard + fieldsCard + itemsCard + totalsCard + companyCard +
+      `<button type="button" class="add-line" id="docPdfBtn" style="margin-top:4px;">PDF出力</button>`;
+
+    el.querySelectorAll('[data-doctype]').forEach(btn=>{
+      btn.addEventListener('click',()=>{ currentDocType=btn.dataset.doctype; renderDocs(); });
+    });
+    el.querySelectorAll('[data-docpath]').forEach(inp=>{
+      inp.addEventListener('input',()=>{ setVal(record, inp.dataset.docpath, inp.value); });
+    });
+    el.querySelectorAll('[data-docitem]').forEach(cb=>{
+      cb.addEventListener('change',()=>{
+        const idx=+cb.dataset.docitem;
+        let sel=record.documents.order.selected;
+        if(cb.checked){ if(!sel.includes(idx)) sel.push(idx); }
+        else { record.documents.order.selected=sel.filter(x=>x!==idx); }
+        renderDocs();
+      });
+    });
+    $('docPdfBtn').addEventListener('click', ()=>{ exportDocumentPdf(currentDocType, record); });
+  }
+
+  function buildDocumentPrintHTML(docType, rec){
+    const b=rec.basic||{};
+    const df=rec.documents&&rec.documents[docType]||{};
+    const isOrder=docType==='order';
+    const items = isOrder ? (rec.workItems||[]).filter((w,i)=>(df.selected||[]).includes(i)) : (rec.workItems||[]);
+    const totals=computeDocTotals(items);
+    let html=`<div class="p-header"><div class="p-title">${esc(DOC_TYPE_TITLES[docType])}</div>`;
+    if(df.no) html+=`<div class="p-sub">No. ${esc(df.no)}</div>`;
+    html+=`<div class="p-sub">発行日：${new Date().toLocaleDateString('ja-JP')}</div></div>`;
+
+    html+=`<div class="p-section"><table class="p-kv">
+      <tr><th>物件名称</th><td>${esc(b.propertyName||'')} ${esc(b.room||'')}</td></tr>
+      ${b.address?`<tr><th>物件所在地</th><td>${esc(b.address)}</td></tr>`:''}
+      ${df.clientContact?`<tr><th>ご担当者</th><td>${esc(df.clientContact)} 様</td></tr>`:''}
+      ${df.orderTo?`<tr><th>発注先</th><td>${esc(df.orderTo)} 御中</td></tr>`:''}
+      ${df.workDate?`<tr><th>作業予定日</th><td>${esc(df.workDate)}</td></tr>`:''}
+      ${df.constructionPeriod?`<tr><th>工期</th><td>${esc(df.constructionPeriod)}</td></tr>`:''}
+      ${df.validity?`<tr><th>有効期限</th><td>${esc(df.validity)}</td></tr>`:''}
+      ${df.clientPaymentTerms?`<tr><th>支払条件</th><td>${esc(df.clientPaymentTerms)}</td></tr>`:''}
+    </table></div>`;
+
+    html+=`<div class="p-section"><table class="p-table"><thead><tr><th>箇所</th><th>施工内容</th><th>仕様</th><th>数量</th><th>単価</th><th>金額</th></tr></thead><tbody>`;
+    if(items.length){
+      items.forEach(w=>{
+        html+=`<tr><td>${esc(w.location||'-')}</td><td>${esc(w.content||'-')}</td><td>${esc(w.model||'-')}</td><td>${esc(w.qty||'-')}${esc(w.unit||'')}</td><td>${esc(w.unitPrice||'-')}</td><td>${esc(w.amount||'-')}</td></tr>`;
+      });
+    } else {
+      html+=`<tr><td colspan="6" style="text-align:center;color:#888;">項目がありません</td></tr>`;
+    }
+    html+=`</tbody></table></div>`;
+
+    if(!isOrder){
+      html+=`<div class="p-section"><table class="p-kv">
+        <tr><th>小計</th><td>${totals.sub.toLocaleString()}円</td></tr>
+        <tr><th>消費税（10%）</th><td>${totals.tax.toLocaleString()}円</td></tr>
+        <tr><th>${docType==='invoice'?'ご請求金額':'税込合計金額'}</th><td><b>${totals.total.toLocaleString()}円</b></td></tr>
+      </table></div>`;
+    }
+
+    html+=`<div class="p-section"><div class="p-text">${esc(companyInfo.name||'')}<br>${esc(companyInfo.address||'').replace(/\n/g,'<br>')}<br>TEL：${esc(companyInfo.tel||'')}　担当：${esc(companyInfo.contact||'')}${companyInfo.subPaymentTerms&&isOrder?`<br>支払条件：${esc(companyInfo.subPaymentTerms)}`:''}</div></div>`;
+    return html;
+  }
+
+  function exportDocumentPdf(docType, rec){
+    const doc = buildFullPrintDocument(rec, buildDocumentPrintHTML(docType, rec), DOC_TYPE_TITLES[docType]);
+    let w=null;
+    try{ w=window.open('', '_blank'); }catch(e){ w=null; }
+    if(w){ w.document.open(); w.document.write(doc); w.document.close(); }
+    else {
+      try{
+        const blob=new Blob([doc],{type:'text/html'});
+        const url=URL.createObjectURL(blob);
+        const a=document.createElement('a');
+        a.href=url; a.download=(DOC_TYPE_TITLES[docType]||'書類')+'.html';
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(()=>URL.revokeObjectURL(url),5000);
+        alert('この画面では新しいタブを開けなかったため、印刷用のファイルをダウンロードしました。ダウンロードしたファイルを開いて印刷（PDF保存）してください。');
+      }catch(e){ alert('PDF出力に失敗しました。'); }
+    }
+  }
+
   /* ---------------- SETTINGS TAB (pulldown masters) ---------------- */
   function renderMasterCard(key){
     const def=MASTER_REGISTRY[key];
@@ -1337,6 +1544,20 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
       </div>
     </div>`;
   }
+  function renderCompanyInfoCard(){
+    return `<div class="settings-group">
+      <div class="settings-group-title">発行元情報（書類作成タブで使用）</div>
+      <div class="card">
+        <div class="small-note" style="margin-bottom:10px;color:var(--text-soft);font-size:12.5px;">見積書・請書・請求書・発注書の発行元として表示される、御社の情報です。</div>
+        <div class="field"><span class="field-label">会社名</span><input type="text" id="companyNameInput" value="${esc(companyInfo.name||'')}"></div>
+        <div class="field"><span class="field-label">住所</span><textarea id="companyAddressInput">${esc(companyInfo.address||'')}</textarea></div>
+        <div class="field"><span class="field-label">電話番号</span><input type="text" id="companyTelInput" value="${esc(companyInfo.tel||'')}"></div>
+        <div class="field"><span class="field-label">担当者</span><input type="text" id="companyContactInput" value="${esc(companyInfo.contact||'')}"></div>
+        <div class="field"><span class="field-label">発注書用 支払条件（当社→業者）</span><input type="text" id="companySubPayInput" value="${esc(companyInfo.subPaymentTerms||'')}"></div>
+        <button type="button" class="add-line" id="companyInfoSaveBtn">保存</button>
+      </div>
+    </div>`;
+  }
   function renderSettings(){
     const el=$('settingsBody');
     const nav=`<div class="settings-subnav">${SETTINGS_TAB_ORDER.map(k=>
@@ -1347,6 +1568,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
       const keys=Object.keys(MASTER_REGISTRY).filter(k=>MASTER_REGISTRY[k].group===group);
       return `<div class="settings-group"><div class="settings-group-title">${esc(group)}</div>${keys.map(renderMasterCard).join('')}</div>`;
     }).join('');
+    if(currentSettingsTab==='basic') body += renderCompanyInfoCard();
     if(currentSettingsTab==='work') body += renderPriceMasterCard() + renderAiSettingsCard();
     el.innerHTML = nav + body;
     el.querySelectorAll('[data-stab]').forEach(btn=>{
@@ -1366,6 +1588,21 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
         await saveAiKey();
         aiSaveBtn.textContent='保存しました ✓';
         setTimeout(()=>{ aiSaveBtn.textContent='保存'; },1200);
+      });
+    }
+    const companyInfoSaveBtn=el.querySelector('#companyInfoSaveBtn');
+    if(companyInfoSaveBtn){
+      companyInfoSaveBtn.addEventListener('click', async ()=>{
+        companyInfo={
+          name: $('companyNameInput').value.trim(),
+          address: $('companyAddressInput').value,
+          tel: $('companyTelInput').value.trim(),
+          contact: $('companyContactInput').value.trim(),
+          subPaymentTerms: $('companySubPayInput').value.trim(),
+        };
+        await saveCompanyInfo();
+        companyInfoSaveBtn.textContent='保存しました ✓';
+        setTimeout(()=>{ companyInfoSaveBtn.textContent='保存'; },1200);
       });
     }
     el.querySelectorAll('[data-priceinput]').forEach(inp=>{
@@ -1624,12 +1861,14 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     @media print{ .p-guide{display:none;} body{padding:0;} }
   `;
 
-  function buildFullPrintDocument(rec){
+  function buildFullPrintDocument(rec, contentHtmlOverride, titleOverride){
     const guide = `<div class="p-guide no-print">印刷ダイアログが自動で開かない場合は、キーボードの <b>Ctrl+P</b>（Macは <b>⌘+P</b>）を押すか、ブラウザメニューの「印刷」を選んでください。印刷画面で「PDFとして保存」を選ぶとPDF化できます。</div>`;
+    const title = titleOverride || (rec.basic&&rec.basic.propertyName) || '物件メモ';
+    const content = contentHtmlOverride!=null ? contentHtmlOverride : buildPrintHTML(rec);
     return `<!DOCTYPE html><html lang="ja"><head><meta charset="UTF-8">
-      <title>${esc((rec.basic&&rec.basic.propertyName)||'物件メモ')} 出力</title>
+      <title>${esc(title)} 出力</title>
       <style>${PRINT_STYLE}</style></head>
-      <body>${guide}${buildPrintHTML(rec)}
+      <body>${guide}${content}
       <script>window.onload=function(){ setTimeout(function(){ try{ window.focus(); window.print(); }catch(e){} }, 250); };<\/script>
       </body></html>`;
   }
@@ -1667,7 +1906,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
   }
   document.querySelectorAll('#tabs button').forEach(btn=>{ btn.addEventListener('click',()=>switchTab(btn.dataset.tab)); });
 
-  function renderAll(){ renderBasic(); renderEquip(); renderWork(); renderNotes(); renderLog(); renderSettings(); }
+  function renderAll(){ renderBasic(); renderEquip(); renderWork(); renderNotes(); renderDocs(); renderLog(); renderSettings(); }
 
   $('saveBtn').addEventListener('click', async ()=>{
     if(!record.meta.id){ record.meta.id=Date.now().toString(36)+Math.random().toString(36).slice(2,7); record.meta.createdAt=Date.now(); }
@@ -1692,6 +1931,8 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     customWorkContents = await loadCustomWorkContents();
     workPriceMaster = await loadWorkPriceMaster();
     aiApiKey = await loadAiKey();
+    companyInfo = await loadCompanyInfo();
+    if(!companyInfo || !Object.keys(companyInfo).length){ companyInfo=Object.assign({}, DEFAULT_COMPANY_INFO); await saveCompanyInfo(); }
     const commonSeeded = seedCommonPriceDefaults();
     const companySeeded = seedCompanyPriceDefaults();
     if(commonSeeded || companySeeded) await saveWorkPriceMaster();
