@@ -238,6 +238,20 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
 <script>
 (function(){
   const $=(id)=>document.getElementById(id);
+  // このファイルは Claude.ai のプレビュー内でも、GitHub Pages等で単独ホスティングした場合でも動くようにする。
+  // window.storage は Claude.ai のアーティファクト表示内でのみ使える特殊なAPIなので、
+  // それが無い環境（GitHub Pagesや普通のブラウザで直接開いた場合）では localStorage を代わりに使う。
+  const hasArtifactStorage = (typeof window.storage !== 'undefined') && window.storage && typeof window.storage.get === 'function';
+  const storageAPI = hasArtifactStorage ? window.storage : {
+    async get(key){
+      try{ const raw = localStorage.getItem(key); return raw===null ? null : {value: raw}; }
+      catch(e){ return null; }
+    },
+    async set(key, value){
+      try{ localStorage.setItem(key, value); return {value}; }
+      catch(e){ console.error(e); return null; }
+    }
+  };
   const STORE_RECORDS='property-records';
   const STORE_CUSTOM_WORK='custom-work-contents';
   const STORE_WORK_PRICE='work-content-prices';
@@ -1065,11 +1079,11 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
   const STORE_AI_KEY='ai-api-key';
   let aiApiKey='';
   async function loadAiKey(){
-    try{ const res=await window.storage.get(STORE_AI_KEY,false); if(res&&res.value) return res.value; }catch(e){}
+    try{ const res=await storageAPI.get(STORE_AI_KEY); if(res&&res.value) return res.value; }catch(e){}
     return '';
   }
   async function saveAiKey(){
-    try{ await window.storage.set(STORE_AI_KEY, aiApiKey, false); }catch(e){ console.error(e); }
+    try{ await storageAPI.set(STORE_AI_KEY, aiApiKey); }catch(e){ console.error(e); }
   }
 
   let voiceMediaRecorder=null, voiceAudioChunks=[], voiceRecognizer=null, voiceRecordStart=null, voiceTimerInterval=null;
@@ -1414,18 +1428,18 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
 
   /* ---------------- STORAGE ---------------- */
   async function loadCustomWorkContents(){
-    try{ const res=await window.storage.get(STORE_CUSTOM_WORK,false); if(res&&res.value){
+    try{ const res=await storageAPI.get(STORE_CUSTOM_WORK); if(res&&res.value){
       const raw=JSON.parse(res.value);
       return raw.map(c=> typeof c==='string' ? {name:c,unit:''} : c);
     }}catch(e){}
     return [];
   }
   async function saveCustomWorkContents(){
-    try{ await window.storage.set(STORE_CUSTOM_WORK, JSON.stringify(customWorkContents), false); }catch(e){ console.error(e); }
+    try{ await storageAPI.set(STORE_CUSTOM_WORK, JSON.stringify(customWorkContents)); }catch(e){ console.error(e); }
   }
   async function loadWorkPriceMaster(){
     try{
-      const res=await window.storage.get(STORE_WORK_PRICE,false);
+      const res=await storageAPI.get(STORE_WORK_PRICE);
       if(res&&res.value){
         const raw=JSON.parse(res.value);
         const keys=Object.keys(raw);
@@ -1437,21 +1451,21 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     return {};
   }
   async function saveWorkPriceMaster(){
-    try{ await window.storage.set(STORE_WORK_PRICE, JSON.stringify(workPriceMaster), false); }catch(e){ console.error(e); }
+    try{ await storageAPI.set(STORE_WORK_PRICE, JSON.stringify(workPriceMaster)); }catch(e){ console.error(e); }
   }
   async function loadRecords(){
-    try{ const res=await window.storage.get(STORE_RECORDS,false); if(res&&res.value) return JSON.parse(res.value); }catch(e){}
+    try{ const res=await storageAPI.get(STORE_RECORDS); if(res&&res.value) return JSON.parse(res.value); }catch(e){}
     return [];
   }
   async function saveRecords(list){
-    try{ await window.storage.set(STORE_RECORDS, JSON.stringify(list), false); }catch(e){ console.error(e); }
+    try{ await storageAPI.set(STORE_RECORDS, JSON.stringify(list)); }catch(e){ console.error(e); }
   }
   async function loadMasters(){
-    try{ const res=await window.storage.get(STORE_MASTERS,false); if(res&&res.value) return JSON.parse(res.value); }catch(e){}
+    try{ const res=await storageAPI.get(STORE_MASTERS); if(res&&res.value) return JSON.parse(res.value); }catch(e){}
     return {};
   }
   async function saveMasters(){
-    try{ await window.storage.set(STORE_MASTERS, JSON.stringify(masters), false); }catch(e){ console.error(e); }
+    try{ await storageAPI.set(STORE_MASTERS, JSON.stringify(masters)); }catch(e){ console.error(e); }
   }
 
   /* ---------------- LOG TAB ---------------- */
