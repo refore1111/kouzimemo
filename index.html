@@ -297,9 +297,8 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
   const MASTER_REGISTRY = {
     tantou:            {label:'担当',                 group:'基本情報',   options:[]},
     managementCompany: {label:'管理会社名',           group:'基本情報',   options:[]},
-    unlockMethod:      {label:'内見方法',               group:'基本情報',   options:['アンロックアシスト','キーBOX','玄関','勝手口','その他']},
-    keyLocation:       {label:'鍵の設置場所',           group:'基本情報',   options:['集合ポスト','メールボックス内','手渡し封筒','キーBOX','その他']},
-    cylinderPlan:      {label:'シリンダー交換予定',     group:'基本情報',   options:['玄関','勝手口','済']},
+    managementContact: {label:'管理会社 担当者名',     group:'基本情報',   options:[]},
+    workType:          {label:'工事種類',               group:'基本情報',   options:['原状回復','修繕','フルリノベ','リフォーム','その他']},
 
     aircon_location:   {label:'エアコン 設置箇所',       group:'エアコン',   options:['LDK','洋室','和室','その他']},
     aircon_maker:      {label:'エアコン メーカー',       group:'エアコン',   options:['ダイキン','パナソニック','東芝','日立','三菱','シャープ','富士通','その他']},
@@ -417,27 +416,22 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
   /* ---------------- BASIC TAB ---------------- */
   const basicCards=[
     {title:'物件情報', fields:[
-      {key:'propertyCD',label:'物件CD',type:'text'},
+      {key:'workType',label:'工事種類',type:'select',masterKey:'workType'},
       {key:'propertyName',label:'物件名',type:'text'},
       {key:'address',label:'所在地',type:'text'},
       {key:'room',label:'部屋番号・号室',type:'text'},
       {key:'managementCompany',label:'管理会社名',type:'select',masterKey:'managementCompany'},
+      {key:'managementContact',label:'管理会社 担当者名',type:'select',masterKey:'managementContact'},
       {key:'tachiaiDate',label:'立会日',type:'date'},
       {key:'tantou',label:'担当',type:'select',masterKey:'tantou'},
-      {key:'ukemoto',label:'請元',type:'text'},
     ]},
     {title:'鍵・入室情報', fields:[
-      {key:'unlockMethod',label:'内見方法',type:'select',masterKey:'unlockMethod'},
       {key:'unlockDetail',label:'内見方法 詳細・番号',type:'text',placeholder:'キーBOX番号やその他の場所など'},
-      {key:'keyLocation',label:'鍵の設置場所',type:'select',masterKey:'keyLocation'},
+      {key:'autoLock',label:'オートロック',type:'yesno'},
       {key:'autoLockNo',label:'オートロック No.',type:'text'},
-      {key:'cylinderPlan',label:'シリンダー交換予定',type:'select',masterKey:'cylinderPlan'},
-      {key:'cylinderPlace',label:'交換予定 場所詳細',type:'text'},
-      {key:'keyModel',label:'鍵型番',type:'text'},
-      {key:'parking',label:'駐輪場',type:'yesno'},
-      {key:'parkingDetail',label:'駐輪場 詳細',type:'text'},
+      {key:'parking',label:'業者駐車場',type:'yesno'},
+      {key:'parkingDetail',label:'業者駐車場　詳細',type:'text'},
       {key:'postDialNo',label:'ポストダイヤル No.',type:'text'},
-      {key:'waterHeaterDrain',label:'給湯器水抜き',type:'yesno'},
     ]},
   ];
 
@@ -1765,7 +1759,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     const b=rec.basic||{}; const c=rec.cleaning||{}; const n=rec.notes||{};
     const lines=[];
     lines.push(`【物件情報】`);
-    lines.push(`物件名：${b.propertyName||''}　所在地：${b.address||''}　号室：${b.room||''}　管理会社：${b.managementCompany||''}　立会日：${b.tachiaiDate||''}　担当：${b.tantou||''}　請元：${b.ukemoto||''}`);
+    lines.push(`物件名：${b.propertyName||''}　所在地：${b.address||''}　号室：${b.room||''}　管理会社：${b.managementCompany||''}　立会日：${b.tachiaiDate||''}　担当：${b.tantou||''}`);
     lines.push(``,`【工事内容】`);
     if(rec.workItems && rec.workItems.length){
       rec.workItems.forEach(w=>{
@@ -1803,7 +1797,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     html+=`<div class="p-header">
       <div class="p-title">${esc(b.propertyName||'（物件名未設定）')} ${esc(b.room||'')}</div>
       ${b.address?`<div class="p-sub">${esc(b.address)}</div>`:''}
-      <div class="p-sub">管理会社：${esc(b.managementCompany||'-')}　立会日：${esc(b.tachiaiDate||'-')}　担当：${esc(b.tantou||'-')}　請元：${esc(b.ukemoto||'-')}　物件CD：${esc(b.propertyCD||'-')}</div>
+      <div class="p-sub">管理会社：${esc(b.managementCompany||'-')}${b.managementContact?`（${esc(b.managementContact)}）`:''}　立会日：${esc(b.tachiaiDate||'-')}　担当：${esc(b.tantou||'-')}　工事種類：${esc(b.workType||'-')}</div>
       <div class="p-sub">出力日：${new Date().toLocaleDateString('ja-JP')}</div>
     </div>`;
     basicCards.forEach(card=>{
