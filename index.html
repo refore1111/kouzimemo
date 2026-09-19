@@ -404,6 +404,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     {title:'物件情報', fields:[
       {key:'propertyCD',label:'物件CD',type:'text'},
       {key:'propertyName',label:'物件名',type:'text'},
+      {key:'address',label:'所在地',type:'text'},
       {key:'room',label:'部屋番号・号室',type:'text'},
       {key:'managementCompany',label:'管理会社名',type:'select',masterKey:'managementCompany'},
       {key:'tachiaiDate',label:'立会日',type:'date'},
@@ -1527,7 +1528,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     const b=rec.basic||{}; const c=rec.cleaning||{}; const n=rec.notes||{};
     const lines=[];
     lines.push(`【物件情報】`);
-    lines.push(`物件名：${b.propertyName||''}　号室：${b.room||''}　管理会社：${b.managementCompany||''}　立会日：${b.tachiaiDate||''}　担当：${b.tantou||''}　請元：${b.ukemoto||''}`);
+    lines.push(`物件名：${b.propertyName||''}　所在地：${b.address||''}　号室：${b.room||''}　管理会社：${b.managementCompany||''}　立会日：${b.tachiaiDate||''}　担当：${b.tantou||''}　請元：${b.ukemoto||''}`);
     lines.push(``,`【工事内容】`);
     if(rec.workItems && rec.workItems.length){
       rec.workItems.forEach(w=>{
@@ -1564,6 +1565,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     let html='';
     html+=`<div class="p-header">
       <div class="p-title">${esc(b.propertyName||'（物件名未設定）')} ${esc(b.room||'')}</div>
+      ${b.address?`<div class="p-sub">${esc(b.address)}</div>`:''}
       <div class="p-sub">管理会社：${esc(b.managementCompany||'-')}　立会日：${esc(b.tachiaiDate||'-')}　担当：${esc(b.tantou||'-')}　請元：${esc(b.ukemoto||'-')}　物件CD：${esc(b.propertyCD||'-')}</div>
       <div class="p-sub">出力日：${new Date().toLocaleDateString('ja-JP')}</div>
     </div>`;
