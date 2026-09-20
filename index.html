@@ -237,10 +237,15 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
       const ok = !!(getRes && getRes.value==='ok');
       const warn = document.getElementById('storageWarning');
       if(warn) warn.style.display = ok ? 'none' : 'block';
+      return ok;
     }catch(e){
       const warn = document.getElementById('storageWarning');
       if(warn) warn.style.display = 'block';
+      return false;
     }
+  }
+  function warnSaveFailed(){
+    alert('保存に失敗しました。データ量が多すぎるか、この環境ではブラウザに保存できない可能性があります（プライベートブラウズモードなど）。画面上部に警告が出ていないかご確認ください。');
   }
   const STORE_RECORDS='property-records';
   const STORE_CUSTOM_WORK='custom-work-contents';
@@ -907,7 +912,8 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     return {};
   }
   async function savePropertyMaster(){
-    try{ await storageAPI.set(STORE_PROPERTY_MASTER, JSON.stringify(propertyMaster)); }catch(e){ console.error(e); }
+    try{ const res=await storageAPI.set(STORE_PROPERTY_MASTER, JSON.stringify(propertyMaster)); return !!res; }
+    catch(e){ console.error(e); return false; }
   }
   function seedPropertyMasterDefaults(){
     let changed=false;
@@ -1100,12 +1106,12 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
         const price=$('newChipPrice-'+idx).value.trim();
         if(!name) return;
         if(!customWorkContents.find(c=>c.name===name)) customWorkContents.push({name,unit});
-        await saveCustomWorkContents();
+        if(!await saveCustomWorkContents()) warnSaveFailed();
         if(price){
           const targetCompany=(record.basic && record.basic.managementCompany) || COMMON_PRICE_KEY;
           if(!workPriceMaster[targetCompany]) workPriceMaster[targetCompany]={};
           workPriceMaster[targetCompany][name]=price;
-          await saveWorkPriceMaster();
+          if(!await saveWorkPriceMaster()) warnSaveFailed();
         }
         record.workItems[idx].content=name;
         record.workItems[idx].unit=unit || record.workItems[idx].unit || '';
@@ -1184,7 +1190,8 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     return {};
   }
   async function saveCompanyInfo(){
-    try{ await storageAPI.set(STORE_COMPANY_INFO, JSON.stringify(companyInfo)); }catch(e){ console.error(e); }
+    try{ const res=await storageAPI.set(STORE_COMPANY_INFO, JSON.stringify(companyInfo)); return !!res; }
+    catch(e){ console.error(e); return false; }
   }
 
   const DOC_TYPES=[
@@ -1626,7 +1633,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
         if(!confirm('この物件をマスタから削除しますか？')) return;
         const idx=+btn.dataset.delprop;
         propertyMaster[currentPropertyCompany].splice(idx,1);
-        await savePropertyMaster();
+        if(!await savePropertyMaster()) warnSaveFailed();
         renderSettings();
       });
     });
@@ -1644,7 +1651,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
         if(address) entry.address=address;
         if(al) entry.al=al;
         if(ev) entry.ev=ev;
-        await savePropertyMaster();
+        if(!await savePropertyMaster()) warnSaveFailed();
         renderSettings();
       });
     }
@@ -1660,7 +1667,8 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
           clientPaymentTerms: $('companyClientPayInput').value.trim(),
           subPaymentTerms: $('companySubPayInput').value.trim(),
         };
-        await saveCompanyInfo();
+        const ok = await saveCompanyInfo();
+        if(!ok){ warnSaveFailed(); return; }
         companyInfoSaveBtn.textContent='保存しました ✓';
         setTimeout(()=>{ companyInfoSaveBtn.textContent='保存'; },1200);
       });
@@ -1670,7 +1678,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
         const name=inp.dataset.priceinput;
         if(!workPriceMaster[currentPriceCompany]) workPriceMaster[currentPriceCompany]={};
         workPriceMaster[currentPriceCompany][name]=inp.value.trim();
-        await saveWorkPriceMaster();
+        if(!await saveWorkPriceMaster()) warnSaveFailed();
       });
     });
     const priceNewAddBtn=el.querySelector('#priceNewAddBtn');
@@ -1683,12 +1691,12 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
         const alreadyKnown = !!WORK_CONTENT_UNITS[name] || customWorkContents.some(c=>c.name===name);
         if(!alreadyKnown){
           customWorkContents.push({name,unit});
-          await saveCustomWorkContents();
+          if(!await saveCustomWorkContents()) warnSaveFailed();
         }
         if(price){
           if(!workPriceMaster[currentPriceCompany]) workPriceMaster[currentPriceCompany]={};
           workPriceMaster[currentPriceCompany][name]=price;
-          await saveWorkPriceMaster();
+          if(!await saveWorkPriceMaster()) warnSaveFailed();
         }
         renderSettings();
       });
@@ -1701,7 +1709,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
         if(!val) return;
         if(!masters[key]) masters[key]=[];
         if(!masters[key].includes(val)) masters[key].push(val);
-        await saveMasters();
+        if(!await saveMasters()) warnSaveFailed();
         renderSettings();
       });
     });
@@ -1709,7 +1717,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
       span.addEventListener('click', async ()=>{
         const [key,idxStr]=span.dataset.rmopt.split('::');
         masters[key].splice(+idxStr,1);
-        await saveMasters();
+        if(!await saveMasters()) warnSaveFailed();
         renderSettings();
       });
     });
@@ -1718,7 +1726,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
         const key=btn.dataset.resetkey;
         if(!confirm('この項目を初期設定に戻しますか？追加した内容は削除されます。')) return;
         masters[key]=MASTER_REGISTRY[key].options.slice();
-        await saveMasters();
+        if(!await saveMasters()) warnSaveFailed();
         renderSettings();
       });
     });
@@ -1733,7 +1741,8 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     return [];
   }
   async function saveCustomWorkContents(){
-    try{ await storageAPI.set(STORE_CUSTOM_WORK, JSON.stringify(customWorkContents)); }catch(e){ console.error(e); }
+    try{ const res=await storageAPI.set(STORE_CUSTOM_WORK, JSON.stringify(customWorkContents)); return !!res; }
+    catch(e){ console.error(e); return false; }
   }
   async function loadWorkPriceMaster(){
     try{
@@ -1749,21 +1758,24 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     return {};
   }
   async function saveWorkPriceMaster(){
-    try{ await storageAPI.set(STORE_WORK_PRICE, JSON.stringify(workPriceMaster)); }catch(e){ console.error(e); }
+    try{ const res=await storageAPI.set(STORE_WORK_PRICE, JSON.stringify(workPriceMaster)); return !!res; }
+    catch(e){ console.error(e); return false; }
   }
   async function loadRecords(){
     try{ const res=await storageAPI.get(STORE_RECORDS); if(res&&res.value) return JSON.parse(res.value); }catch(e){}
     return [];
   }
   async function saveRecords(list){
-    try{ await storageAPI.set(STORE_RECORDS, JSON.stringify(list)); }catch(e){ console.error(e); }
+    try{ const res=await storageAPI.set(STORE_RECORDS, JSON.stringify(list)); return !!res; }
+    catch(e){ console.error(e); return false; }
   }
   async function loadMasters(){
     try{ const res=await storageAPI.get(STORE_MASTERS); if(res&&res.value) return JSON.parse(res.value); }catch(e){}
     return {};
   }
   async function saveMasters(){
-    try{ await storageAPI.set(STORE_MASTERS, JSON.stringify(masters)); }catch(e){ console.error(e); }
+    try{ const res=await storageAPI.set(STORE_MASTERS, JSON.stringify(masters)); return !!res; }
+    catch(e){ console.error(e); return false; }
   }
 
   /* ---------------- LOG TAB ---------------- */
