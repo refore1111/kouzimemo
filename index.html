@@ -2148,10 +2148,6 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     allRecords = recordsLoaded;
     // 読み込みが一時的に失敗しただけの可能性があるため、空に見えても自動ではクラウドに書き込まない（表示だけ初期値にする）
     if(!companyInfo || !Object.keys(companyInfo).length){ companyInfo=Object.assign({}, DEFAULT_COMPANY_INFO); }
-    else if(companyInfo.address && companyInfo.address.includes('九段南')){
-      // 以前の版で入れていた仮の住所が残っている場合は、画面表示だけ実際の書式に合わせる（保存はしない）
-      companyInfo = Object.assign({}, DEFAULT_COMPANY_INFO, companyInfo, {address: DEFAULT_COMPANY_INFO.address});
-    }
     const commonSeeded = seedCommonPriceDefaults();
     const companySeeded = seedCompanyPriceDefaults();
     const propSeeded = seedPropertyMasterDefaults();
