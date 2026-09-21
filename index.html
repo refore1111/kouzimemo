@@ -270,11 +270,18 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     }catch(e){ console.error('Firebase init failed', e); }
   }
   const CLOUD_COLLECTION='kouzimemo';
+  // Firestoreへの通信がブロック・失敗して固まった場合に、アプリ全体が固まらないようにするためのタイムアウト
+  function withTimeout(promise, ms){
+    return Promise.race([
+      promise,
+      new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')), ms))
+    ]);
+  }
   const cloudImpl = {
     async get(key){
       if(!firestoreDb) return null;
       try{
-        const snap = await firestoreDb.collection(CLOUD_COLLECTION).doc(key).get();
+        const snap = await withTimeout(firestoreDb.collection(CLOUD_COLLECTION).doc(key).get(), 6000);
         if(snap.exists && snap.data() && snap.data().value!==undefined) return {value: snap.data().value};
         return null;
       }catch(e){ console.error(e); return null; }
@@ -282,7 +289,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     async set(key, value){
       if(!firestoreDb) return null;
       try{
-        await firestoreDb.collection(CLOUD_COLLECTION).doc(key).set({value: value, updatedAt: Date.now()});
+        await withTimeout(firestoreDb.collection(CLOUD_COLLECTION).doc(key).set({value: value, updatedAt: Date.now()}), 6000);
         return {value};
       }catch(e){ console.error(e); return null; }
     }
@@ -2107,28 +2114,32 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
   $('pdfBtn').addEventListener('click', ()=>{ exportPdf(record); });
 
   (async function init(){
-    masters = await loadMasters();
+    const [mastersLoaded, customWorkContentsLoaded, workPriceMasterLoaded, propertyMasterLoaded, companyInfoLoaded, recordsLoaded] = await Promise.all([
+      loadMasters(), loadCustomWorkContents(), loadWorkPriceMaster(), loadPropertyMaster(), loadCompanyInfo(), loadRecords()
+    ]);
+    masters = mastersLoaded;
     ensureMastersDefaults();
-    customWorkContents = await loadCustomWorkContents();
-    workPriceMaster = await loadWorkPriceMaster();
-    propertyMaster = await loadPropertyMaster();
-    companyInfo = await loadCompanyInfo();
-    if(!companyInfo || !Object.keys(companyInfo).length){ companyInfo=Object.assign({}, DEFAULT_COMPANY_INFO); await saveCompanyInfo(); }
+    customWorkContents = customWorkContentsLoaded;
+    workPriceMaster = workPriceMasterLoaded;
+    propertyMaster = propertyMasterLoaded;
+    companyInfo = companyInfoLoaded;
+    allRecords = recordsLoaded;
+    if(!companyInfo || !Object.keys(companyInfo).length){ companyInfo=Object.assign({}, DEFAULT_COMPANY_INFO); saveCompanyInfo(); }
     else if(companyInfo.address && companyInfo.address.includes('九段南')){
       // 以前の版で入れていた仮の住所が残っている場合は、実際の書式に合わせて更新する
       companyInfo = Object.assign({}, DEFAULT_COMPANY_INFO, companyInfo, {address: DEFAULT_COMPANY_INFO.address});
-      await saveCompanyInfo();
+      saveCompanyInfo();
     }
     const commonSeeded = seedCommonPriceDefaults();
     const companySeeded = seedCompanyPriceDefaults();
     const propSeeded = seedPropertyMasterDefaults();
     const migration = migrateCompanyNames();
-    if(commonSeeded || companySeeded || migration.priceChanged) await saveWorkPriceMaster();
-    if(companySeeded || migration.mastersChanged) await saveMasters();
-    if(propSeeded || migration.propChanged) await savePropertyMaster();
-    allRecords = await loadRecords();
-    await checkStorageWorking();
+    // 画面をすぐ使えるようにするため、先に描画してから、裏側で保存・診断を行う（保存に時間がかかっても操作をブロックしない）
     renderAll();
+    if(commonSeeded || companySeeded || migration.priceChanged) saveWorkPriceMaster();
+    if(companySeeded || migration.mastersChanged) saveMasters();
+    if(propSeeded || migration.propChanged) savePropertyMaster();
+    checkStorageWorking();
   })();
 })();
 </script>
