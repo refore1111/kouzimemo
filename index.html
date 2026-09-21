@@ -146,6 +146,8 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
 #calcOk{background:var(--amber);color:var(--ink);}
 .no-print{}
 </style>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
 </head>
 <body>
 <div id="app">
@@ -181,7 +183,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
       <div id="logList"></div>
     </div>
     <div class="tabpanel" id="tab-settings">
-      <div class="settings-intro">プルダウンの選択肢はここで自由に追加・削除できます。追加した項目は次回以降、各タブの入力ですぐ選べるようになります。</div>
+      <div class="settings-intro">プルダウンの選択肢はここで自由に追加・削除できます。追加した項目は次回以降、各タブの入力ですぐ選べるようになります。<br><span id="cloudStatusLine"></span></div>
       <div id="settingsBody"></div>
     </div>
   </main>
@@ -246,7 +248,65 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
         return res;
       }catch(e){ return await localStorageImpl.set(key, value); }
     }
-  } : localStorageImpl;
+  } : buildBrowserStorageAPI();
+
+  // ---- クラウド同期（Firebase Firestore）----
+  // 会社のFirebaseプロジェクトを作成後、下記に設定値を入れると、
+  // どの端末・ブラウザから開いても同じデータが見えるようになる。未設定の間はブラウザ内保存のみで動作する。
+  const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyCBU63MbfsvsHoKywjoJYwwIPRchpIRoG0",
+    authDomain: "kouzimemo.firebaseapp.com",
+    projectId: "kouzimemo",
+    storageBucket: "kouzimemo.firebasestorage.app",
+    messagingSenderId: "742320174934",
+    appId: "1:742320174934:web:aaa7568f6c7448261c88f7",
+  };
+  let firestoreDb = null, cloudReady = false;
+  if(FIREBASE_CONFIG && typeof firebase !== 'undefined'){
+    try{
+      firebase.initializeApp(FIREBASE_CONFIG);
+      firestoreDb = firebase.firestore();
+      cloudReady = true;
+    }catch(e){ console.error('Firebase init failed', e); }
+  }
+  const CLOUD_COLLECTION='kouzimemo';
+  const cloudImpl = {
+    async get(key){
+      if(!firestoreDb) return null;
+      try{
+        const snap = await firestoreDb.collection(CLOUD_COLLECTION).doc(key).get();
+        if(snap.exists && snap.data() && snap.data().value!==undefined) return {value: snap.data().value};
+        return null;
+      }catch(e){ console.error(e); return null; }
+    },
+    async set(key, value){
+      if(!firestoreDb) return null;
+      try{
+        await firestoreDb.collection(CLOUD_COLLECTION).doc(key).set({value: value, updatedAt: Date.now()});
+        return {value};
+      }catch(e){ console.error(e); return null; }
+    }
+  };
+  // ブラウザ内保存(localStorage)は常にキャッシュとして使いつつ、クラウド設定済みならクラウドを優先する
+  function buildBrowserStorageAPI(){
+    return {
+      async get(key){
+        if(cloudReady){
+          const cloudRes = await cloudImpl.get(key);
+          if(cloudRes){ localStorageImpl.set(key, cloudRes.value).catch(()=>{}); return cloudRes; }
+        }
+        return await localStorageImpl.get(key);
+      },
+      async set(key, value){
+        const localRes = await localStorageImpl.set(key, value);
+        if(cloudReady){
+          const cloudRes = await cloudImpl.set(key, value);
+          return cloudRes || localRes;
+        }
+        return localRes;
+      }
+    };
+  }
   async function checkStorageWorking(){
     try{
       const testKey='__storage_selftest__';
@@ -1626,6 +1686,14 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
       btn.addEventListener('click',()=>{ currentSettingsTab=btn.dataset.stab; renderSettings(); });
     });
     bindSettingsEvents(el);
+    const cloudLine=$('cloudStatusLine');
+    if(cloudLine){
+      cloudLine.textContent = cloudReady
+        ? '☁ クラウド同期：有効（どの端末・ブラウザからでも同じデータが見えます）'
+        : '☁ クラウド同期：未設定（今はこの端末・このブラウザだけに保存されています）';
+      cloudLine.style.color = cloudReady ? '#3E7A5E' : '#C24A32';
+      cloudLine.style.fontWeight = '700';
+    }
   }
   function bindSettingsEvents(el){
     const companySelect=el.querySelector('#priceCompanySelect');
