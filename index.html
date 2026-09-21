@@ -278,20 +278,33 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     ]);
   }
   const cloudImpl = {
-    async get(key){
+    async get(key, _retried){
       if(!firestoreDb) return null;
       try{
         const snap = await withTimeout(firestoreDb.collection(CLOUD_COLLECTION).doc(key).get(), 6000);
         if(snap.exists && snap.data() && snap.data().value!==undefined) return {value: snap.data().value};
         return null;
-      }catch(e){ console.error(e); return null; }
+      }catch(e){
+        // 起動直後はFirestoreへの接続がまだ確立していないことがあるため、少し待って1回だけ再試行する
+        if(!_retried){
+          await new Promise(r=>setTimeout(r, 900));
+          return cloudImpl.get(key, true);
+        }
+        console.error(e); return null;
+      }
     },
-    async set(key, value){
+    async set(key, value, _retried){
       if(!firestoreDb) return null;
       try{
         await withTimeout(firestoreDb.collection(CLOUD_COLLECTION).doc(key).set({value: value, updatedAt: Date.now()}), 6000);
         return {value};
-      }catch(e){ console.error(e); return null; }
+      }catch(e){
+        if(!_retried){
+          await new Promise(r=>setTimeout(r, 900));
+          return cloudImpl.set(key, value, true);
+        }
+        console.error(e); return null;
+      }
     }
   };
   // ブラウザ内保存(localStorage)は常にキャッシュとして使いつつ、クラウド設定済みならクラウドを優先する
@@ -316,7 +329,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
   }
   async function checkStorageWorking(){
     try{
-      const testKey='__storage_selftest__';
+      const testKey='app_storage_selftest';
       const setRes = await storageAPI.set(testKey, 'ok');
       const getRes = setRes ? await storageAPI.get(testKey) : null;
       const ok = !!(getRes && getRes.value==='ok');
@@ -2124,11 +2137,11 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     propertyMaster = propertyMasterLoaded;
     companyInfo = companyInfoLoaded;
     allRecords = recordsLoaded;
-    if(!companyInfo || !Object.keys(companyInfo).length){ companyInfo=Object.assign({}, DEFAULT_COMPANY_INFO); saveCompanyInfo(); }
+    // 読み込みが一時的に失敗しただけの可能性があるため、空に見えても自動ではクラウドに書き込まない（表示だけ初期値にする）
+    if(!companyInfo || !Object.keys(companyInfo).length){ companyInfo=Object.assign({}, DEFAULT_COMPANY_INFO); }
     else if(companyInfo.address && companyInfo.address.includes('九段南')){
-      // 以前の版で入れていた仮の住所が残っている場合は、実際の書式に合わせて更新する
+      // 以前の版で入れていた仮の住所が残っている場合は、画面表示だけ実際の書式に合わせる（保存はしない）
       companyInfo = Object.assign({}, DEFAULT_COMPANY_INFO, companyInfo, {address: DEFAULT_COMPANY_INFO.address});
-      saveCompanyInfo();
     }
     const commonSeeded = seedCommonPriceDefaults();
     const companySeeded = seedCompanyPriceDefaults();
