@@ -216,6 +216,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
 
 <script>
 (function(){
+  console.log('%c[property-memo build] 2026-09-21-v3','color:#E8A33D;font-weight:bold;');
   const $=(id)=>document.getElementById(id);
   // このファイルは Claude.ai のプレビュー内でも、GitHub Pages等で単独ホスティングした場合でも動くようにする。
   // window.storage は Claude.ai のアーティファクト表示内（iframe埋め込み時）でのみ使える特殊なAPIなので、
@@ -282,28 +283,35 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
       if(!firestoreDb) return null;
       try{
         const snap = await withTimeout(firestoreDb.collection(CLOUD_COLLECTION).doc(key).get(), 6000);
-        if(snap.exists && snap.data() && snap.data().value!==undefined) return {value: snap.data().value};
+        if(snap.exists && snap.data() && snap.data().value!==undefined){
+          console.log('[cloud get OK]', key);
+          return {value: snap.data().value};
+        }
+        console.log('[cloud get: no document yet]', key);
         return null;
       }catch(e){
+        console.warn('[cloud get FAILED]', key, _retried?'(after retry)':'(1st try)', e && e.message);
         // 起動直後はFirestoreへの接続がまだ確立していないことがあるため、少し待って1回だけ再試行する
         if(!_retried){
           await new Promise(r=>setTimeout(r, 900));
           return cloudImpl.get(key, true);
         }
-        console.error(e); return null;
+        return null;
       }
     },
     async set(key, value, _retried){
       if(!firestoreDb) return null;
       try{
         await withTimeout(firestoreDb.collection(CLOUD_COLLECTION).doc(key).set({value: value, updatedAt: Date.now()}), 6000);
+        console.log('[cloud set OK]', key);
         return {value};
       }catch(e){
+        console.warn('[cloud set FAILED]', key, _retried?'(after retry)':'(1st try)', e && e.message);
         if(!_retried){
           await new Promise(r=>setTimeout(r, 900));
           return cloudImpl.set(key, value, true);
         }
-        console.error(e); return null;
+        return null;
       }
     }
   };
@@ -2136,6 +2144,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     workPriceMaster = workPriceMasterLoaded;
     propertyMaster = propertyMasterLoaded;
     companyInfo = companyInfoLoaded;
+    console.log('[companyInfo loaded]', JSON.stringify(companyInfoLoaded));
     allRecords = recordsLoaded;
     // 読み込みが一時的に失敗しただけの可能性があるため、空に見えても自動ではクラウドに書き込まない（表示だけ初期値にする）
     if(!companyInfo || !Object.keys(companyInfo).length){ companyInfo=Object.assign({}, DEFAULT_COMPANY_INFO); }
