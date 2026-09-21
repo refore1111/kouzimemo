@@ -216,10 +216,13 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
 (function(){
   const $=(id)=>document.getElementById(id);
   // このファイルは Claude.ai のプレビュー内でも、GitHub Pages等で単独ホスティングした場合でも動くようにする。
-  // window.storage は Claude.ai のアーティファクト表示内でのみ使える特殊なAPIなので、
-  // それが無い環境（GitHub Pagesや普通のブラウザで直接開いた場合）では localStorage を代わりに使う。
-  const hasArtifactStorage = (typeof window.storage !== 'undefined') && window.storage && typeof window.storage.get === 'function';
-  const storageAPI = hasArtifactStorage ? window.storage : {
+  // window.storage は Claude.ai のアーティファクト表示内（iframe埋め込み時）でのみ使える特殊なAPIなので、
+  // それ以外の環境（GitHub Pagesや普通のブラウザで直接開いた場合）では、たとえ window.storage が
+  // 何らかの理由で存在していても使わず、必ず localStorage を使う（誤判定によるデータ消失を防ぐため）。
+  const isInIframe = (function(){ try{ return window.top !== window.self; }catch(e){ return true; } })();
+  const hasArtifactStorage = isInIframe && (typeof window.storage !== 'undefined') && window.storage
+    && typeof window.storage.get === 'function' && typeof window.storage.set === 'function';
+  const localStorageImpl = {
     async get(key){
       try{ const raw = localStorage.getItem(key); return raw===null ? null : {value: raw}; }
       catch(e){ return null; }
@@ -229,6 +232,21 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
       catch(e){ console.error(e); return null; }
     }
   };
+  const storageAPI = hasArtifactStorage ? {
+    async get(key){
+      try{ return await window.storage.get(key, false); }
+      catch(e){ return await localStorageImpl.get(key); }
+    },
+    async set(key, value){
+      try{
+        const res = await window.storage.set(key, value, false);
+        // 書き込み後に読み返して検証し、失敗していれば localStorage にも保存しておく（保険）
+        const check = await window.storage.get(key, false).catch(()=>null);
+        if(!check || check.value !== value) return await localStorageImpl.set(key, value);
+        return res;
+      }catch(e){ return await localStorageImpl.set(key, value); }
+    }
+  } : localStorageImpl;
   async function checkStorageWorking(){
     try{
       const testKey='__storage_selftest__';
@@ -1590,42 +1608,13 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
       </div>
     </div>`;
   }
-  function runStorageDiagnostic(){
-    const lines=[];
-    lines.push('URL: '+location.href);
-    lines.push('Origin: '+location.origin);
-    lines.push('保存方式: '+(hasArtifactStorage?'Claude.aiのアーティファクト保存':'ブラウザのlocalStorage'));
-    lines.push('');
-    const items=[
-      ['記録一覧', STORE_RECORDS],
-      ['工事内容カスタム', STORE_CUSTOM_WORK],
-      ['単価マスタ', STORE_WORK_PRICE],
-      ['選択マスタ（担当・管理会社等）', STORE_MASTERS],
-      ['物件マスタ', STORE_PROPERTY_MASTER],
-      ['会社情報', STORE_COMPANY_INFO],
-    ];
-    items.forEach(([label,key])=>{
-      if(hasArtifactStorage){
-        lines.push(label+'：Claude.ai内保存のため、ここでは確認できません');
-      } else {
-        try{
-          const raw=localStorage.getItem(key);
-          lines.push(label+'：'+(raw===null?'データなし':raw.length+'文字保存されています'));
-        }catch(e){
-          lines.push(label+'：読み取りエラー（'+e.message+'）');
-        }
-      }
-    });
-    alert(lines.join('\n'));
-  }
   function renderSettings(){
     const el=$('settingsBody');
     const nav=`<div class="settings-subnav">${SETTINGS_TAB_ORDER.map(k=>
       `<button type="button" class="settings-tab-btn${k===currentSettingsTab?' active':''}" data-stab="${k}">${esc(SETTINGS_TAB_LABELS[k])}</button>`
     ).join('')}</div>`;
     const groupsToShow = SETTINGS_GROUP_ORDER.filter(g=>SETTINGS_TAB_GROUPS[currentSettingsTab].includes(g));
-    let body = `<button type="button" class="add-line" id="storageDiagBtn" style="margin-bottom:14px;">保存状況を診断</button>`;
-    body += groupsToShow.map(group=>{
+    let body = groupsToShow.map(group=>{
       const keys=Object.keys(MASTER_REGISTRY).filter(k=>MASTER_REGISTRY[k].group===group);
       return `<div class="settings-group"><div class="settings-group-title">${esc(group)}</div>${keys.map(renderMasterCard).join('')}</div>`;
     }).join('');
@@ -1636,8 +1625,6 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     el.querySelectorAll('[data-stab]').forEach(btn=>{
       btn.addEventListener('click',()=>{ currentSettingsTab=btn.dataset.stab; renderSettings(); });
     });
-    const diagBtn=el.querySelector('#storageDiagBtn');
-    if(diagBtn) diagBtn.addEventListener('click', runStorageDiagnostic);
     bindSettingsEvents(el);
   }
   function bindSettingsEvents(el){
