@@ -1364,6 +1364,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     reading:'リフォア',
     address:'〒130-0004\n東京都墨田区本所4-1-3-502',
     tel:'03-6824-7182',
+    fax:'03-6369-4214',
     contact:'金子（090-4422-7404）',
     clientPaymentTerms:'工事完了月末締、翌月末日支払',
     subPaymentTerms:'工事完了月末締め、翌々月10日支払い',
@@ -1503,7 +1504,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     </div>`;
 
     const companyCard=`<div class="card"><h3>発行元情報（設定タブ→基本情報で編集）</h3>
-      <div class="small-note" style="color:var(--text-soft);font-size:12.5px;white-space:pre-wrap;">${esc(companyInfo.name||'')}\n${esc(companyInfo.address||'')}\nTEL：${esc(companyInfo.tel||'')}\n担当：${esc(getDocumentContact(record))}</div>
+      <div class="small-note" style="color:var(--text-soft);font-size:12.5px;white-space:pre-wrap;">${esc(companyInfo.name||'')}\n${esc(companyInfo.address||'')}\nTEL：${esc(companyInfo.tel||'')}${companyInfo.fax?`　FAX：${esc(companyInfo.fax)}`:''}\n担当：${esc(getDocumentContact(record))}</div>
     </div>`;
 
     el.innerHTML = nav + headerCard + fieldsCard + itemsCard + totalsCard + companyCard +
@@ -1580,7 +1581,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     if(isOrder) html += `<div class="p-doc-line">【発注者】</div>`;
     html += `<div class="p-doc-line"><b>${esc(companyInfo.name||'')}</b>${isOrder&&companyInfo.reading?`（${esc(companyInfo.reading)}）`:''}</div>`;
     html += `<div class="p-doc-line">${esc((companyInfo.address||'').replace(/\n/g,'　'))}</div>`;
-    html += `<div class="p-doc-line">TEL；${esc(companyInfo.tel||'')}</div>`;
+    html += `<div class="p-doc-line">TEL；${esc(companyInfo.tel||'')}${companyInfo.fax?`　FAX；${esc(companyInfo.fax)}`:''}</div>`;
     html += `<div class="p-doc-line">${isOrder?'弊社担当':'工事担当'}；　${esc(getDocumentContact(rec))}</div>`;
     if(isOrder && companyInfo.subPaymentTerms) html += `<div class="p-doc-line">支払条件：${esc(companyInfo.subPaymentTerms)}</div>`;
     html += `</div></div>`;
@@ -1771,6 +1772,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
         <div class="field"><span class="field-label">会社名の読み方（発注書のみ表示・任意）</span><input type="text" id="companyReadingInput" value="${esc(companyInfo.reading||'')}"></div>
         <div class="field"><span class="field-label">住所（〒含む・複数行可）</span><textarea id="companyAddressInput">${esc(companyInfo.address||'')}</textarea></div>
         <div class="field"><span class="field-label">電話番号</span><input type="text" id="companyTelInput" value="${esc(companyInfo.tel||'')}"></div>
+        <div class="field"><span class="field-label">FAX番号</span><input type="text" id="companyFaxInput" value="${esc(companyInfo.fax||'')}"></div>
         <div class="field"><span class="field-label">担当者</span><input type="text" id="companyContactInput" value="${esc(companyInfo.contact||'')}"></div>
         <div class="field"><span class="field-label">見積書・請書用 支払条件（先方→当社）</span><input type="text" id="companyClientPayInput" value="${esc(companyInfo.clientPaymentTerms||'')}"></div>
         <div class="field"><span class="field-label">発注書用 支払条件（当社→業者）</span><input type="text" id="companySubPayInput" value="${esc(companyInfo.subPaymentTerms||'')}"></div>
@@ -1859,6 +1861,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
           reading: $('companyReadingInput').value.trim(),
           address: $('companyAddressInput').value,
           tel: $('companyTelInput').value.trim(),
+          fax: $('companyFaxInput').value.trim(),
           contact: $('companyContactInput').value.trim(),
           clientPaymentTerms: $('companyClientPayInput').value.trim(),
           subPaymentTerms: $('companySubPayInput').value.trim(),
@@ -2230,6 +2233,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     allRecords = recordsLoaded;
     // 読み込みが一時的に失敗しただけの可能性があるため、空に見えても自動ではクラウドに書き込まない（表示だけ初期値にする）
     if(!companyInfo || !Object.keys(companyInfo).length){ companyInfo=Object.assign({}, DEFAULT_COMPANY_INFO); }
+    else if(companyInfo.fax===undefined){ companyInfo.fax=DEFAULT_COMPANY_INFO.fax; }
     const commonSeeded = seedCommonPriceDefaults();
     const companySeeded = seedCompanyPriceDefaults();
     const propSeeded = seedPropertyMasterDefaults();
