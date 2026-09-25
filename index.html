@@ -69,6 +69,11 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
 /* work items */
 .work-row{background:#fff;border:1px solid var(--paper-2);border-left:4px solid var(--amber-dark);border-radius:6px;padding:12px;margin-bottom:12px;position:relative;}
 .work-row .rm{position:absolute;top:10px;right:10px;background:none;border:none;color:var(--red);font-size:12.5px;cursor:pointer;font-weight:700;}
+.property-search-results{position:relative;z-index:6;background:#fff;border:1px solid var(--panel);border-top:none;border-radius:0 0 6px 6px;max-height:240px;overflow-y:auto;margin-top:-6px;box-shadow:0 4px 10px rgba(0,0,0,.12);}
+.property-search-item{padding:9px 12px;font-size:13.5px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;gap:8px;border-bottom:1px solid var(--paper-2);}
+.property-search-item:last-child{border-bottom:none;}
+.property-search-item:hover{background:var(--paper);}
+.property-search-company{font-size:11px;color:var(--text-soft);background:var(--paper);padding:2px 8px;border-radius:10px;white-space:nowrap;}
 .property-row{background:#fff;border:1px solid var(--paper-2);border-left:4px solid var(--panel);border-radius:6px;padding:12px 44px 12px 14px;margin-bottom:10px;position:relative;}
 .property-row .rm{position:absolute;top:10px;right:10px;background:none;border:none;color:var(--red);font-size:12.5px;cursor:pointer;font-weight:700;}
 .property-name{font-weight:700;font-size:14.5px;color:var(--panel);margin-bottom:5px;}
@@ -507,7 +512,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
   const basicCards=[
     {title:'物件情報', fields:[
       {key:'workType',label:'工事種類',type:'select',masterKey:'workType'},
-      {key:'propertyName',label:'物件名',type:'text',list:'propertyNameDatalist'},
+      {key:'propertyName',label:'物件名',type:'text'},
       {key:'address',label:'所在地',type:'text'},
       {key:'room',label:'部屋番号・号室',type:'text'},
       {key:'managementCompany',label:'管理会社名',type:'select',masterKey:'managementCompany'},
@@ -528,10 +533,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
 
   function renderBasic(){
     const el=$('tab-basic');
-    const company=(record.basic&&record.basic.managementCompany)||'';
-    const propNames=(propertyMaster[company]||[]).map(p=>p.name);
-    const datalistHtml=`<datalist id="propertyNameDatalist">${propNames.map(n=>`<option value="${esc(n)}"></option>`).join('')}</datalist>`;
-    el.innerHTML=basicCards.map(c=>renderCard(c,'basic')).join('')+datalistHtml;
+    el.innerHTML=basicCards.map(c=>renderCard(c,'basic')).join('');
     bindFieldEvents(el);
 
     const nameInput=el.querySelector('[data-path="basic.propertyName"]');
@@ -540,21 +542,96 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     const autoLockSelect=el.querySelector('[data-path="basic.autoLock"]');
     const elevatorGroup=el.querySelector('[data-path="basic.elevator"]');
 
+    // 物件名欄のすぐ下に、検索候補の表示エリアと「自動入力」ボタンを追加する
+    if(nameInput){
+      const fieldWrap=nameInput.closest('.field');
+      const extra=document.createElement('div');
+      extra.innerHTML=`<div class="property-search-results" id="propertySearchResults" style="display:none;"></div>
+        <button type="button" class="add-line" id="propertyAutofillBtn" style="margin-top:8px;">物件マスタから所在地・管理会社・鍵情報を自動入力</button>`;
+      fieldWrap.appendChild(extra);
+    }
+
+    function applyEntryToBasic(entry, force){
+      let changed=false;
+      if(entry.address && (force || !record.basic.address)){ record.basic.address=entry.address; changed=true; }
+      if(entry.al && (force || !record.basic.autoLock)){ record.basic.autoLock=entry.al; changed=true; }
+      if(entry.ev){
+        const evVal=(entry.ev==='有')?'有':(entry.ev==='無'?'無':entry.ev);
+        if(force || !record.basic.elevator){ record.basic.elevator=evVal; changed=true; }
+      }
+      return changed;
+    }
+
     function applyPropertyLookup(){
       const co=(record.basic.managementCompany||'').trim();
       const nm=(record.basic.propertyName||'').trim();
       const entry=findPropertyInMaster(co, nm);
-      if(entry){
-        let changed=false;
-        if(entry.address && !record.basic.address){ record.basic.address=entry.address; changed=true; }
-        if(entry.al && !record.basic.autoLock){ record.basic.autoLock=entry.al; changed=true; }
-        if(entry.ev && !record.basic.elevator){ record.basic.elevator = (entry.ev==='有')?'有':(entry.ev==='無'?'無':entry.ev); changed=true; }
-        if(changed) renderBasic();
-      }
+      if(entry && applyEntryToBasic(entry,false)) renderBasic();
     }
+
+    function selectProperty(name, company){
+      record.basic.propertyName=name;
+      if(company) record.basic.managementCompany=company;
+      const entry=findPropertyInMaster(company||record.basic.managementCompany, name);
+      if(entry) applyEntryToBasic(entry, true);
+      renderBasic();
+    }
+
+    function searchProperties(query){
+      const q=query.trim().toLowerCase();
+      if(q.length<2) return [];
+      const results=[];
+      const companyFilter=(record.basic.managementCompany||'').trim();
+      const companies=companyFilter?[companyFilter]:Object.keys(propertyMaster);
+      companies.forEach(co=>{
+        (propertyMaster[co]||[]).forEach(p=>{
+          if(p.name.toLowerCase().includes(q)) results.push({name:p.name, company:co});
+        });
+      });
+      return results.slice(0,30);
+    }
+
+    function renderSearchResults(query){
+      const box=$('propertySearchResults');
+      if(!box) return;
+      const results=searchProperties(query);
+      if(!results.length){ box.style.display='none'; box.innerHTML=''; return; }
+      box.innerHTML=results.map(r=>`<div class="property-search-item" data-pname="${esc(r.name)}" data-pcompany="${esc(r.company)}">${esc(r.name)}<span class="property-search-company">${esc(r.company)}</span></div>`).join('');
+      box.style.display='block';
+      box.querySelectorAll('.property-search-item').forEach(item=>{
+        item.addEventListener('mousedown',(e)=>{
+          e.preventDefault(); // 入力欄のblurより先に発火させるため
+          selectProperty(item.dataset.pname, item.dataset.pcompany);
+        });
+      });
+    }
+
     if(nameInput){
+      nameInput.addEventListener('input',()=>{ renderSearchResults(nameInput.value); });
+      nameInput.addEventListener('focus',()=>{ if(nameInput.value.trim().length>=2) renderSearchResults(nameInput.value); });
+      nameInput.addEventListener('blur',()=>{
+        setTimeout(()=>{ const box=$('propertySearchResults'); if(box) box.style.display='none'; },150);
+        syncPropertyToMaster();
+      });
       nameInput.addEventListener('change', applyPropertyLookup);
-      nameInput.addEventListener('blur', syncPropertyToMaster);
+    }
+    const autofillBtn=$('propertyAutofillBtn');
+    if(autofillBtn){
+      autofillBtn.addEventListener('click',()=>{
+        const co=(record.basic.managementCompany||'').trim();
+        const nm=(record.basic.propertyName||'').trim();
+        if(!nm){ alert('物件名を入力してください。'); return; }
+        let entry=findPropertyInMaster(co, nm);
+        if(!entry){
+          for(const c of Object.keys(propertyMaster)){
+            const found=findPropertyInMaster(c, nm);
+            if(found){ record.basic.managementCompany=c; entry=found; break; }
+          }
+        }
+        if(!entry){ alert('物件マスタに一致する物件が見つかりませんでした。'); return; }
+        applyEntryToBasic(entry, true);
+        renderBasic();
+      });
     }
     if(companySelect){
       companySelect.addEventListener('change', ()=>{ applyPropertyLookup(); renderBasic(); });
@@ -1347,6 +1424,11 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
   }
 
   // items[].qty × items[].[priceField] を合計する。「サービス」など数値でない単価は0円扱い。
+  // 書類の「担当」表示：基本情報で選ばれている担当があればそれを優先し、無ければ発行元情報の担当にフォールバックする
+  function getDocumentContact(rec){
+    const b=(rec&&rec.basic)||{};
+    return b.tantou || companyInfo.contact || '';
+  }
   function computeDocTotals(items, priceField){
     priceField = priceField || 'unitPrice';
     const sub = items.reduce((s,w)=>{
@@ -1421,7 +1503,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     </div>`;
 
     const companyCard=`<div class="card"><h3>発行元情報（設定タブ→基本情報で編集）</h3>
-      <div class="small-note" style="color:var(--text-soft);font-size:12.5px;white-space:pre-wrap;">${esc(companyInfo.name||'')}\n${esc(companyInfo.address||'')}\nTEL：${esc(companyInfo.tel||'')}\n担当：${esc(companyInfo.contact||'')}</div>
+      <div class="small-note" style="color:var(--text-soft);font-size:12.5px;white-space:pre-wrap;">${esc(companyInfo.name||'')}\n${esc(companyInfo.address||'')}\nTEL：${esc(companyInfo.tel||'')}\n担当：${esc(getDocumentContact(record))}</div>
     </div>`;
 
     el.innerHTML = nav + headerCard + fieldsCard + itemsCard + totalsCard + companyCard +
@@ -1499,7 +1581,7 @@ input:focus,textarea:focus,select:focus{outline:2px solid var(--amber);}
     html += `<div class="p-doc-line"><b>${esc(companyInfo.name||'')}</b>${isOrder&&companyInfo.reading?`（${esc(companyInfo.reading)}）`:''}</div>`;
     html += `<div class="p-doc-line">${esc((companyInfo.address||'').replace(/\n/g,'　'))}</div>`;
     html += `<div class="p-doc-line">TEL；${esc(companyInfo.tel||'')}</div>`;
-    html += `<div class="p-doc-line">${isOrder?'弊社担当':'工事担当'}；　${esc(companyInfo.contact||'')}</div>`;
+    html += `<div class="p-doc-line">${isOrder?'弊社担当':'工事担当'}；　${esc(getDocumentContact(rec))}</div>`;
     if(isOrder && companyInfo.subPaymentTerms) html += `<div class="p-doc-line">支払条件：${esc(companyInfo.subPaymentTerms)}</div>`;
     html += `</div></div>`;
 
